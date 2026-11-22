@@ -55,10 +55,10 @@ with st.sidebar:
     st.markdown("## 💃 NRITYA AI")
     st.caption("INDIAN CLASSICAL DANCE INTELLIGENCE")
     st.divider()
-    page = st.radio("WORKSPACE", ["Overview","Dataset Studio","Model Lab","Recognition Studio","Dance Learning Guide","Project Guide"])
+    page = st.radio("WORKSPACE", ["Overview","Dataset Studio","Model Lab","Recognition Studio","Dance Learning Guide"])
     st.divider()
     st.markdown("**MODEL STATUS**")
-    st.success("Trained model available" if MODEL_PATH.exists() else "Awaiting training")
+    st.markdown(f'<div style="color:#000000;font-weight:600;padding:.35rem 0">{"Trained model available" if MODEL_PATH.exists() else "Awaiting training"}</div>', unsafe_allow_html=True)
     st.caption("Local academic prototype")
 
 st.markdown("""<div class="hero"><div class="eyebrow">Artificial Intelligence · Computer Vision · Heritage</div><h1>Indian Classical Dance<br>Recognition System</h1><p>Analyze body posture with human pose estimation and machine learning — from labeled dataset to image, video and webcam analysis.</p></div>""", unsafe_allow_html=True)
@@ -251,18 +251,6 @@ elif page == "Dance Learning Guide":
                                 st.write(f"• **{row['Joint']}**: {row['Feedback'].lower()} (difference {row['Difference']}°)")
                         st.caption("Left/right labels refer to the dancer, not the viewer. Match camera viewpoint and avoid mirrored images for best comparison.")
                 except Exception as e: st.error(f"Could not analyze input: {e}")
-
-else:
-    title("Workspace / Guide","Project guide & limitations","Use this section to explain the technical workflow and report results responsibly.")
-    with st.expander("Technical workflow",expanded=True):
-        st.write("MediaPipe Pose extracts 33 body landmarks. The coordinates are normalized and supplied to a Random Forest classifier trained on labeled images.")
-    with st.expander("What does the score mean?"):
-        st.write("The displayed score is the classifier's predict_proba output. It is not calibrated confidence and does not guarantee correctness.")
-    with st.expander("Current limitations"):
-        st.write("This prototype focuses on body posture. It does not yet classify hand mudras, facial expressions, rhythm or temporal choreography. Similar poses may occur across dance forms.")
-    with st.expander("Evaluation"):
-        st.write("Report the measured held-out accuracy, precision, recall, F1-score and confusion matrix. Avoid near-duplicate or same-session leakage between training and test data.")
-    st.write("**Supported categories:** "+" · ".join(CLASSES))
 
 st.divider()
 st.markdown('<p style="text-align:center;color:#8b796e;font-size:.8rem">NRITYA AI · Academic prototype · Recognition quality depends on dataset quality</p>',unsafe_allow_html=True)
