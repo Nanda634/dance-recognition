@@ -9,12 +9,18 @@ def load_model(path):
     return bundle["model"]
 
 def predict_image(image_bgr, model, draw=True):
+    """Returns (label, score, annotated, probs). probs is None if no pose found."""
     features, annotated = get_pose(image_bgr, draw=draw, complexity=0)
     if features is None:
-        return None, None, annotated
+        return None, None, annotated, None
     probs = model.predict_proba([features])[0]
     idx = int(np.argmax(probs))
-    return str(model.classes_[idx]), float(probs[idx]), annotated
+    return str(model.classes_[idx]), float(probs[idx]), annotated, probs
+
+def predict_video_frame(image_bgr, model, draw=True):
+    """Single-frame prediction for video sampling with a progress bar.
+    Same signature/returns as predict_image."""
+    return predict_image(image_bgr, model, draw=draw)
 
 def predict_video(video_path, model, max_samples=80):
     cap = cv2.VideoCapture(str(video_path))
@@ -29,7 +35,7 @@ def predict_video(video_path, model, max_samples=80):
         if not ok:
             break
         if idx % step == 0:
-            label, score, annotated = predict_image(frame, model, draw=True)
+            label, score, annotated, _ = predict_video_frame(frame, model, draw=True)
             if label:
                 predictions.append((label, score))
                 preview = annotated
