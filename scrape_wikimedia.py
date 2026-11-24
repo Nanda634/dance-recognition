@@ -3,7 +3,7 @@ from pathlib import Path
 
 CATEGORIES = {
     
-    "Odissi":    ["Category:Odissi", "Category:Odissi dancers"],
+    "Manipuri":    ["Category:Manipuri", "Category:Manipuri dancers"],
 }
 
 SESSION = requests.Session()
@@ -13,7 +13,7 @@ SESSION.headers.update({
                   "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 })
 
-def get_category_images(category, limit=500):
+def get_category_images(category, limit=1000):
     urls = []
     continue_token = {}
     while len(urls) < limit:
@@ -71,10 +71,10 @@ for cls, categories in CATEGORIES.items():
     seen = set()
     for cat in categories:
         print(f"  fetching {cat} ...")
-        urls = get_category_images(cat, limit=600)
+        urls = get_category_images(cat, limit=1000)
         print(f"  found {len(urls)} images")
         for u in urls:
-            if count >= 500:
+            if count >= 1100:
                 break
             if u in seen:
                 continue
@@ -85,6 +85,6 @@ for cls, categories in CATEGORIES.items():
             if download(u, folder / f"wiki_{count}{ext}"):
                 count += 1
         time.sleep(1)
-        if count >= 500:
+        if count >= 1100:
             break
     print(f"{cls}: DONE at {count}")

@@ -1,16 +1,19 @@
-from pathlib import Path
+import os
 import tempfile
+from pathlib import Path
+
 import cv2
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 from PIL import Image
+
 from src.dataset import CLASSES, discover_classes, extract_dataset
 from src.model import train_from_dataframe
 from src.inference import predict_image, predict_video
 from learning_guide import (DANCE_FORMS, extract as guide_extract, compare as guide_compare,
-    save_reference, list_references, load_reference, analyze_video)
+                            save_reference, list_references, load_reference, analyze_video)
 
 ROOT = Path(__file__).resolve().parent
 RAW = ROOT / "data" / "raw"
@@ -22,7 +25,7 @@ st.set_page_config(page_title="Nritya AI | Dance Recognition", page_icon="💃",
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
-:root{--ink:#2b201b;--muted:#78675d;--cream:#fbf7f1;--paper:#fffdfa;--copper:#a95f3d;--line:#eadfd4}
+:root{--ink:#2b201b;--muted:#78675d;--cream:#fbf7f1;--copper:#a95f3d;--line:#eadfd4}
 html,body,[class*="css"]{font-family:'DM Sans',sans-serif}
 .stApp{background:linear-gradient(180deg,#fbf7f1,#f7f0e8);color:var(--ink)}
 .block-container{max-width:1380px;padding-top:1.35rem;padding-bottom:3rem}
@@ -45,300 +48,313 @@ hr{border-color:#eadfd4} footer,#MainMenu{visibility:hidden}
 </style>
 """, unsafe_allow_html=True)
 
+
 def rgb(bgr):
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-def title(kicker, heading, subtitle):
-    st.markdown(f'<div class="kicker">{kicker}</div><h2 style="font-family:Playfair Display,serif;margin-top:0">{heading}</h2><p style="color:#78675d;margin-top:-.4rem">{subtitle}</p>', unsafe_allow_html=True)
 
-# Fresh class discovery on every app run (covers folders added since last launch)
+def title(kicker, heading, subtitle):
+    st.markdown(
+        f'<div class="kicker">{kicker}</div>'
+        f'<h2 style="font-family:Playfair Display,serif;margin-top:0">{heading}</h2>'
+        f'<p style="color:#78675d;margin-top:-.4rem">{subtitle}</p>',
+        unsafe_allow_html=True)
+
+
+# Fresh class discovery on every app run
 DISCOVERED_CLASSES = discover_classes(RAW) or CLASSES
 
-# NEW: session state defaults so Learning Guide selections persist across reruns
+# Session state defaults
 for key, default in {"guide_dance": DANCE_FORMS[0], "guide_ref_select": None}.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
+# ---------------- Sidebar (defined FIRST — all pages can use these) ----------------
 with st.sidebar:
     st.markdown("## 💃 NRITYA AI")
     st.caption("INDIAN CLASSICAL DANCE INTELLIGENCE")
     st.divider()
-    page = st.radio("WORKSPACE", ["Overview","Dataset Studio","Model Lab","Recognition Studio","Dance Learning Guide"])
+    page = st.radio("WORKSPACE", ["Overview", "Dataset Studio", "Model Lab",
+                                  "Recognition Studio", "Dance Learning Guide"])
+    st.divider()
+
+    # Settings used by Recognition Studio (must exist before the video loop runs)
+    confidence = st.slider("Confidence threshold", 0.0, 1.0, 0.35, 0.05)
+    FRAME_SKIP = st.slider("Analyze every Nth frame", 1, 30, 5,
+                           help="Higher = faster, but may miss fast movements")
+
     st.divider()
     st.markdown("**MODEL STATUS**")
-    st.markdown(f'<div style="color:#000000;font-weight:600;padding:.35rem 0">{"Trained model available" if MODEL_PATH.exists() else "Awaiting training"}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-weight:600;padding:.35rem 0">'
+        f'{"Trained model available" if MODEL_PATH.exists() else "Awaiting training"}</div>',
+        unsafe_allow_html=True)
     st.caption("Local academic prototype")
 
-st.markdown("""<div class="hero"><div class="eyebrow">Artificial Intelligence · Computer Vision · Heritage</div><h1>Indian Classical Dance<br>Recognition System</h1><p>Analyze body posture with human pose estimation and machine learning — from labeled dataset to image, video and webcam analysis.</p></div>""", unsafe_allow_html=True)
+st.markdown(
+    """<div class="hero"><div class="eyebrow">Artificial Intelligence · Computer Vision · Heritage</div>
+    <h1>Indian Classical Dance<br>Recognition System</h1>
+    <p>Analyze body posture with human pose estimation and machine learning — from labeled dataset to image, video and webcam analysis.</p></div>""",
+    unsafe_allow_html=True)
 
+# ============================ OVERVIEW ============================
 if page == "Overview":
-    title("Workspace / Overview","Your dance intelligence workspace","A guided workflow to prepare data, train a model and evaluate dance postures.")
-    metrics = [("Dance categories",f"{len(DISCOVERED_CLASSES):02d}"),("Pose landmarks","33"),("Model status","Ready" if MODEL_PATH.exists() else "Pending")]
+    title("Workspace / Overview", "Your dance intelligence workspace",
+          "A guided workflow to prepare data, train a model and evaluate dance postures.")
+    metrics = [("Dance categories", f"{len(DISCOVERED_CLASSES):02d}"),
+               ("Pose landmarks", "33"),
+               ("Model status", "Ready" if MODEL_PATH.exists() else "Pending")]
     cols = st.columns(3)
-    for col,(label,value) in zip(cols,metrics):
-        col.markdown(f'<div class="metric"><small>{label}</small><strong>{value}</strong></div>',unsafe_allow_html=True)
+    for col, (label, value) in zip(cols, metrics):
+        col.markdown(f'<div class="metric"><small>{label}</small><strong>{value}</strong></div>',
+                     unsafe_allow_html=True)
     st.write("")
     with st.container():
-        st.markdown('<div class="panel">',unsafe_allow_html=True)
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.subheader("How the system works")
-        st.markdown("**01 · Input** — image, video or webcam snapshot\n\n↓\n\n**02 · Pose estimation** — MediaPipe detects 33 body landmarks\n\n↓\n\n**03 · Feature extraction** — normalized body coordinates\n\n↓\n\n**04 · Classification** — Random Forest predicts a dance category\n\n↓\n\n**05 · Output** — annotated skeleton, predicted class and score")
-        st.markdown('</div>',unsafe_allow_html=True)
-    st.info("Start in Dataset Studio. Add labeled images, train and evaluate the model, then test it in Recognition Studio.")
+        st.markdown(
+            "**01 · Input** — image, video or webcam snapshot\n\n↓\n\n"
+            "**02 · Pose estimation** — MediaPipe detects 33 body landmarks\n\n↓\n\n"
+            "**03 · Feature extraction** — normalized body coordinates\n\n↓\n\n"
+            "**04 · Classification** — Random Forest predicts a dance category\n\n↓\n\n"
+            "**05 · Output** — annotated skeleton, predicted class and score")
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.info("Start in Dataset Studio. Add labeled images, train and evaluate the model, "
+            "then test it in Recognition Studio.")
 
+# ============================ DATASET STUDIO ============================
 elif page == "Dataset Studio":
-    title("Workspace / Data","Dataset studio","Upload correctly labeled dance images. Prefer one dancer and a clearly visible full-body pose.")
-    st.markdown('<div class="panel">',unsafe_allow_html=True)
-    category = st.selectbox("Select dance category",DISCOVERED_CLASSES)
-    uploads = st.file_uploader("Upload JPG, PNG or WEBP images",type=["jpg","jpeg","png","webp"],accept_multiple_files=True)
-    if st.button("Save images to dataset",type="primary",disabled=not uploads):
-        folder = RAW/category
-        folder.mkdir(parents=True,exist_ok=True)
-        saved=0
-        for i,f in enumerate(uploads):
-            name=Path(f.name).name.replace(" ","_")
-            dest=folder/name
-            if dest.exists(): dest=folder/f"{dest.stem}_{i}{dest.suffix}"
-            dest.write_bytes(f.getbuffer()); saved+=1
+    title("Workspace / Data", "Dataset studio",
+          "Upload correctly labeled dance images. Prefer one dancer and a clearly visible full-body pose.")
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    category = st.selectbox("Select dance category", DISCOVERED_CLASSES)
+    uploads = st.file_uploader("Upload JPG, PNG or WEBP images",
+                               type=["jpg", "jpeg", "png", "webp"],
+                               accept_multiple_files=True)
+    if st.button("Save images to dataset", type="primary", disabled=not uploads):
+        folder = RAW / category
+        folder.mkdir(parents=True, exist_ok=True)
+        for i, f in enumerate(uploads):
+            name = Path(f.name).name.replace(" ", "_")
+            dest = folder / name
+            if dest.exists():
+                dest = folder / f"{dest.stem}_{i}{dest.suffix}"
+            dest.write_bytes(f.getbuffer())
         st.success(f"Images saved successfully to data/raw/{category}/")
         st.rerun()
-    st.markdown('</div>',unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # NEW: per-category image counts + imbalance warning
     counts = {c: len(list((RAW / c).glob("*"))) for c in DISCOVERED_CLASSES if (RAW / c).exists()}
     if counts:
         st.subheader("Images per category")
         st.bar_chart(pd.DataFrame.from_dict(counts, orient="index", columns=["Images"]))
         smallest = min(counts, key=counts.get)
         if max(counts.values()) >= 2 * max(min(counts.values()), 1):
-            st.warning(f"Class imbalance detected — '{smallest}' has the fewest images ({counts[smallest]}). Consider adding more images for it before training.")
+            st.warning(f"Class imbalance detected — '{smallest}' has the fewest images "
+                       f"({counts[smallest]}). Consider adding more images for it before training.")
+    st.caption("Only use media you own or are permitted to use. "
+               "Avoid near-duplicate images across training and testing.")
 
-    st.caption("Only use media you own or are permitted to use. Avoid near-duplicate images across training and testing.")
-
+# ============================ MODEL LAB ============================
 elif page == "Model Lab":
-    title("Workspace / Training","Model lab","Extract MediaPipe landmarks, train the classifier and inspect held-out test performance.")
+    title("Workspace / Training", "Model lab",
+          "Extract MediaPipe landmarks, train the classifier and inspect held-out test performance.")
 
-    # NEW: pre-check — count images per category, block training if unusable
     counts = [len(list((RAW / c).glob("*"))) for c in DISCOVERED_CLASSES if (RAW / c).exists()]
     if len(counts) < 2 or any(n == 0 for n in counts):
-        st.warning("At least 2 categories with images are required before training. Add images under data/raw/ first.")
-    elif st.button("Extract landmarks & train model",type="primary"):
-        progress=st.progress(0,text="Scanning labeled images...")
+        st.warning("At least 2 categories with images are required before training. "
+                   "Add images under data/raw/ first.")
+    elif st.button("Extract landmarks & train model", type="primary"):
+        progress = st.progress(0, text="Scanning labeled images...")
         try:
-            df,skipped=extract_dataset(RAW,progress=lambda x:progress.progress(x,text=f"Extracting pose features · {x:.0%}"))
+            df, skipped = extract_dataset(
+                RAW, progress=lambda x: progress.progress(x, text=f"Extracting pose features · {x:.0%}"))
             if df.empty:
-                st.error("No usable poses found. Add full-body images to at least two dance categories.")
+                st.error("No valid pose features found. Add full-body images to at least two dance categories.")
             else:
-                (ROOT/"data"/"processed").mkdir(parents=True,exist_ok=True)
-                df.to_csv(ROOT/"data"/"processed"/"pose_features.csv",index=False)
-                result=train_from_dataframe(df,ROOT/"models",OUTPUTS)
+                (ROOT / "data" / "processed").mkdir(parents=True, exist_ok=True)
+                df.to_csv(ROOT / "data" / "processed" / "pose_features.csv", index=False)
+                result = train_from_dataframe(df, ROOT / "models", OUTPUTS)
                 st.success("Model training completed.")
-                m1,m2,m3=st.columns(3)
-                m1.metric("Held-out accuracy",f"{result['accuracy']:.1%}")
-                m2.metric("Usable samples",len(df))
-                m3.metric("Skipped images",len(skipped))
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Held-out accuracy", f"{result['accuracy']:.1%}")
+                m2.metric("Usable samples", len(df))
+                m3.metric("Skipped images", len(skipped))
                 st.subheader("Classification report")
-                st.dataframe(pd.DataFrame(result["report"]).T.round(3),use_container_width=True)
+                st.dataframe(pd.DataFrame(result["report"]).T.round(3), use_container_width=True)
                 st.subheader("Confusion matrix")
-                st.dataframe(pd.DataFrame(result["confusion_matrix"],index=result["classes"],columns=result["classes"]),use_container_width=True)
+                st.dataframe(pd.DataFrame(result["confusion_matrix"],
+                                          index=result["classes"], columns=result["classes"]),
+                             use_container_width=True)
                 if skipped:
                     with st.expander(f"Skipped images ({len(skipped)})"):
-                        st.dataframe(pd.DataFrame(skipped,columns=["File","Reason"]),use_container_width=True)
+                        st.dataframe(pd.DataFrame(skipped, columns=["File", "Reason"]),
+                                     use_container_width=True)
         except Exception as e:
             st.error(f"Training failed: {e}")
-    if MODEL_PATH.exists(): st.success("A trained model is ready.")
-    else: st.warning("No trained model yet. Add data and train before recognition.")
-
-elif page == "Recognition Studio":
-    title("Workspace / Recognition","Recognition studio","Test a still image, a video or a webcam snapshot.")
-    if not MODEL_PATH.exists():
-        st.warning("Train a model in Model Lab first."); st.stop()
-    model=joblib.load(MODEL_PATH)["model"]
-    mode=st.radio("Input type",["Image","Video","Webcam snapshot"],horizontal=True)
-    if mode=="Image":
-        upload=st.file_uploader("Upload a dance image",type=["jpg","jpeg","png","webp"],key="image_input")
-        if upload:
-            pil=Image.open(upload).convert("RGB")
-            frame=cv2.cvtColor(np.array(pil),cv2.COLOR_RGB2BGR)
-            with st.spinner("Detecting pose and classifying..."):
-                label,score,annotated=predict_image(frame,model,draw=True)
-            x,y=st.columns(2)
-            x.image(pil,caption="Original image",use_container_width=True)
-            y.image(rgb(annotated),caption="Pose landmarks",use_container_width=True)
-            if label:
-                st.success(f"Predicted dance form: {label}")
-                st.metric("Classifier score · not calibrated confidence",f"{score:.1%}")
-            else: st.error("No pose detected. Use a well-lit, full-body image.")
-    elif mode=="Video":
-        upload=st.file_uploader("Upload MP4, MOV or AVI",type=["mp4","mov","avi","mkv"],key="video_input")
-        if upload:
-            with tempfile.NamedTemporaryFile(delete=False,suffix=Path(upload.name).suffix or ".mp4") as tmp:
-                tmp.write(upload.getbuffer()); video_path=tmp.name
-            try:
-                # NEW: frame-by-frame progress bar instead of an opaque spinner
-                cap=cv2.VideoCapture(video_path)
-                total=int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-                if total > 0:
-                    max_samples=60
-                    step=max(total//max_samples,1)
-                    progress=st.progress(0,text="Sampling frames...")
-                    winner_preds, preview = [], None
-                    idx, processed = 0, 0
-                    from src.inference import predict_video_frame  # single-frame helper
-                    ret, frame_bgr = cap.read()
-                    while True: 
-                        if not ret: 
-                                break
-                    if idx % step == 0 and processed < max_samples:
-                            try:
-                                label, score, annotated = predict_image(frame_bgr, model, draw=True)
-                                if label:
-                                    winner_preds.append((label, score))
-                                    if preview is None: preview = annotated
-                            except Exception:
-                                pass
-                            processed += 1
-                            progress.progress(min(processed / max_samples, 1.0),
-                                              text=f"Sampling frames · {processed}/{max_samples}")
-                            idx += 1
-                    cap.release()
-                    progress.progress(1.0, text="Done")
-                    winner, preds, prev = (None, [], None)
-                    if winner_preds:
-                        from collections import Counter
-                        winner = Counter(p[0] for p in winner_preds).most_common(1)[0][0]
-                        preds = winner_preds
-                        prev = preview
-                else:
-                    # fallback: use the original batch helper
-                    with st.spinner("Sampling video frames..."):
-                        winner,preds,preview=predict_video(video_path,model,max_samples=60)
-                if winner:
-                    st.success(f"Video result (majority vote): {winner}")
-                    st.metric("Frames with detected poses",len(preds))
-                    st.bar_chart(pd.Series([p[0] for p in preds]).value_counts())
-                    if preview is not None: st.image(rgb(preview),caption="Example annotated frame",use_container_width=True)
-                else: st.error("No human poses found in sampled frames.")
-            except Exception as e: st.error(f"Video processing failed: {e}")
-            finally: Path(video_path).unlink(missing_ok=True)
+    if MODEL_PATH.exists():
+        st.success("A trained model is ready.")
     else:
-        st.info("Allow camera permission. Keep the dancer's full body in view.")
-        snap=st.camera_input("Capture webcam frame")
-        if snap:
-            pil=Image.open(snap).convert("RGB")
-            frame=cv2.cvtColor(np.array(pil),cv2.COLOR_RGB2BGR)
-            label,score,annotated=predict_image(frame,model,draw=True)
-            st.image(rgb(annotated),caption="Detected pose",use_container_width=True)
+        st.warning("No trained model yet. Add data and train before recognition.")
+
+# ============================ RECOGNITION STUDIO ============================
+elif page == "Recognition Studio":
+    title("Workspace / Recognition", "Recognition studio",
+          "Test a still image, a video or a webcam snapshot.")
+    if not MODEL_PATH.exists():
+        st.warning("Train a model in Model Lab first.")
+        st.stop()
+    model = joblib.load(MODEL_PATH)["model"]
+    mode = st.radio("Input type", ["Image", "Video", "Webcam snapshot"], horizontal=True)
+
+    # ---------- Image ----------
+    if mode == "Image":
+        upload = st.file_uploader("Upload a dance image",
+                                  type=["jpg", "jpeg", "png", "webp"], key="image_input")
+        if upload:
+            pil = Image.open(upload).convert("RGB")
+            frame = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+            with st.spinner("Detecting pose and classifying..."):
+                label, score, annotated, probs = predict_image(frame, model, draw=True)
+            x, y = st.columns(2)
+            x.image(pil, caption="Original image", use_container_width=True)
+            y.image(rgb(annotated), caption="Pose landmarks", use_container_width=True)
             if label:
                 st.success(f"Predicted dance form: {label}")
-                st.metric("Classifier score · not calibrated confidence",f"{score:.1%}")
-            else: st.error("No pose detected. Try a full-body image.")
-
-elif page == "Dance Learning Guide":
-    title("Workspace / Learning", "Dance learning guide", "Compare a learner with a saved reference posture. Feedback measures joint-angle differences, not authoritative dance technique.")
-    st.warning("Reference poses must be checked by a qualified instructor before treating feedback as correct technique. This prototype does not assess mudras, facial expression, rhythm, or choreography.")
-    ref_root=ROOT / "data" / "references"
-    dance=st.selectbox("Choose dance form",DANCE_FORMS,key="guide_dance")
-    tab1,tab2=st.tabs(["Reference library", "Practice & feedback"])
-    with tab1:
-        st.subheader("Add a reference posture")
-        st.caption("Use a clear front-facing full-body photo of a correct pose. Name the specific step/posture; each dance form can have multiple reference poses.")
-        pose_name=st.text_input("Posture name (e.g. Araimandi)",key="guide_pose_name")
-        notes=st.text_area("Instructor notes / instructions (optional)",key="guide_notes")
-        ref_upload=st.file_uploader("Upload reference image",type=["jpg","jpeg","png","webp"],key="guide_reference_upload")
-        if ref_upload is not None:
-            ref_pil=Image.open(ref_upload).convert("RGB")
-            st.image(ref_pil,caption="Proposed reference",width=340)
-        if st.button("Save reference pose",type="primary",disabled=not (pose_name.strip() and ref_upload is not None)):
-            try:
-                ref_frame=cv2.cvtColor(np.asarray(ref_pil),cv2.COLOR_RGB2BGR)
-                # NEW: sanitize posture name so it is filesystem-safe
-                safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in pose_name.strip())
-                saved,annotated=save_reference(ref_root,dance,safe_name,ref_frame,notes)
-                st.success(f"Reference saved: {saved.name}")
-                st.image(rgb(annotated),caption="Reference skeleton",width=340)
-                st.rerun()  # NEW: refresh the saved-references list immediately
-            except Exception as e: st.error(str(e))
-        existing=list_references(ref_root,dance)
-        st.caption(f"Saved reference postures for {dance}: {len(existing)}")
-        if existing: st.write(", ".join(p.stem.replace("_"," ") for p in existing))
-    with tab2:
-        references=list_references(ref_root,dance)
-        if not references:
-            st.info("First save at least one reference posture for this dance form in the Reference library tab.")
-        else:
-            # NEW: guard so a stale session_state selection doesn't crash selectbox
-            default_ref = references[0]
-            if st.session_state.get("guide_ref_select") not in [None] + references:
-                st.session_state["guide_ref_select"] = default_ref
-            selected=st.selectbox("Correct reference posture",references,format_func=lambda p:p.stem.replace("_"," "),key="guide_ref_select")
-            reference=load_reference(selected)
-            st.write("**Reference instructions:**",reference.get("notes") or "No instructor notes supplied")
-            ref_image=selected.with_suffix(".jpg")
-            if ref_image.exists(): st.image(str(ref_image),caption="Target reference posture",width=280)
-            tolerance=st.slider("Allowed joint-angle difference (degrees)",5,45,15,5)
-            mode=st.radio("Practice input",["Image","Video","Webcam snapshot"],horizontal=True,key="guide_mode")
-            uploaded=None
-            if mode=="Image":
-                uploaded=st.file_uploader("Upload learner photo",type=["jpg","jpeg","png","webp"],key="guide_student_image")
-            elif mode=="Webcam snapshot":
-                st.info("This mode takes a snapshot. Continuous live coaching requires a streaming webcam implementation.")
-                uploaded=st.camera_input("Capture learner posture",key="guide_student_camera")
+                st.metric("Classifier score · not calibrated confidence", f"{score:.1%}")
             else:
-                uploaded=st.file_uploader("Upload practice video",type=["mp4","mov","avi","mkv"],key="guide_student_video")
-            if uploaded is not None and st.button("Analyze posture",type="primary",key="guide_analyze"):
-                try:
-                    if mode=="Video":
-                        with tempfile.NamedTemporaryFile(delete=False,suffix=Path(uploaded.name).suffix or ".mp4") as tmp:
-                            tmp.write(uploaded.getbuffer()); video_path=tmp.name
-                        try:
-                            with st.spinner("Comparing sampled frames with the selected static reference..."):
-                                samples,preview=analyze_video(video_path,reference["landmarks"],tolerance)
-                        finally: Path(video_path).unlink(missing_ok=True)
-                        if not samples: st.error("No suitable body poses detected in sampled frames.")
+                st.error("No pose detected. Use a well-lit image.")
+
+    # ---------- Video ----------
+    elif mode == "Video":
+        upload = st.file_uploader("Upload MP4, MOV or AVI",
+                                  type=["mp4", "mov", "avi", "mkv"], key="video_input")
+        if upload:
+            with tempfile.NamedTemporaryFile(delete=False,
+                                             suffix=Path(upload.name).suffix or ".mp4") as tmp:
+                tmp.write(upload.getbuffer())
+                video_path = tmp.name
+
+            try:
+                cap = cv2.VideoCapture(video_path)
+                if not cap.isOpened():
+                    st.error("Could not open the video file. Unsupported codec or corrupted file.")
+                else:
+                    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+                    st.info(f"Video: {width}x{height} @ {fps:.1f} fps — "
+                            f"{total} frames (~{total / fps:.1f}s)")
+
+                    frame_idx = 0
+                    results_log = []
+                    progress = st.progress(0.0, text="Processing frames...")
+                    frame_slot = st.empty()   # reused slot → no memory blowup
+
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+
+                        # Run pose classification every N frames to save compute
+                        if frame_idx % FRAME_SKIP == 0:
+                            label, score, annotated, _ = predict_image(frame, model, draw=True)
+                            if label:
+                                results_log.append({
+                                    "frame": frame_idx,
+                                    "time_s": round(frame_idx / fps, 2),
+                                    "dance_form": label,
+                                    "score": round(score, 3),
+                                })
                         else:
-                            st.metric("Average joint-angle match (sampled frames)",f"{np.mean([s['Match %'] for s in samples]):.1f}%")
-                            st.line_chart(pd.DataFrame([{'Frame':s['Frame'],'Match %':s['Match %']} for s in samples]).set_index("Frame"))
-                            if preview is not None: st.image(rgb(preview),caption="Example analyzed frame",width=420)
-                            worst=min(samples,key=lambda x:x["Match %"])
-                            st.write(f"**Feedback for sampled frame {worst['Frame']}**")
-                            st.dataframe(pd.DataFrame(worst["Result"]["rows"]),hide_index=True,use_container_width=True)
-                            st.caption("Video comparison assumes the selected reference pose is held; it does not evaluate sequences or timing.")
+                            annotated = frame
+
+                        frame_slot.image(rgb(annotated), use_container_width=True)
+
+                        frame_idx += 1
+                        progress.progress(min(frame_idx / max(total, 1), 1.0),
+                                          text=f"Frame {frame_idx}/{total}")
+
+                    cap.release()
+                    progress.progress(1.0, text="Done ✅")
+
+                    if results_log:
+                        st.subheader("Dance predictions over time")
+                        st.dataframe(pd.DataFrame(results_log), use_container_width=True)
+                        csv = pd.DataFrame(results_log).to_csv(index=False).encode()
+                        st.download_button("Download predictions CSV", csv,
+                                           "dance_predictions.csv", "text/csv")
                     else:
-                        pil=Image.open(uploaded).convert("RGB")
-                        frame=cv2.cvtColor(np.asarray(pil),cv2.COLOR_RGB2BGR)
-                        student,annotated=guide_extract(frame)
-                        result=guide_compare(student,reference["landmarks"],tolerance)
-                        c1,c2=st.columns(2)
-                        c1.image(pil,caption="Learner",use_container_width=True)
-                        c2.image(rgb(annotated),caption="Detected body landmarks",use_container_width=True)
-                        if result["match_percent"] is None:
-                            st.warning("Not enough visible joints to compare reliably.")
-                        else:
-                            st.metric("Joint-angle match to selected reference",f"{result['match_percent']}%",help="Percentage of measurable joint angles within the chosen tolerance; not a dance proficiency score.")
-                            # NEW: pass/fail status line based on tolerance
-                            if result["match_percent"] >= 80:
-                                st.success("Good match — posture is close to the reference.")
-                            elif result["match_percent"] >= 50:
-                                st.info("Partial match — some joints need adjustment (see feedback below).")
-                            else:
-                                st.warning("Low match — several joints differ significantly from the reference.")
-                        st.dataframe(pd.DataFrame(result["rows"]),hide_index=True,use_container_width=True)
-                        # NEW: collect off-tolerance joints into a proper feedback summary box
-                        off_joints=[row for row in result["rows"]
-                                    if row["Difference"] is not None and row["Difference"]>tolerance]
-                        if off_joints:
-                            with st.expander(f"Corrections needed ({len(off_joints)} joints outside tolerance)",expanded=True):
-                                for row in off_joints:
-                                    st.write(f"• **{row['Joint']}**: {row['Feedback'].lower()} (difference {row['Difference']}°)")
-                        st.caption("Left/right labels refer to the dancer, not the viewer. Match camera viewpoint and avoid mirrored images for best comparison.")
-                except Exception as e: st.error(f"Could not analyze input: {e}")
+                        st.warning("No pose detected in any analyzed frame. "
+                                   "Check lighting / framing, or lower the frame skip.")
+            except Exception as e:
+                st.exception(f"Error while processing video: {e}")
+            finally:
+                if os.path.exists(video_path):
+                    os.unlink(video_path)  # clean up temp file
 
-# NEW: Download results section — let users export a session report
-elif page == "Overview":
-    pass  # (Overview handled above; placeholder not needed)
+    # ---------- Webcam snapshot ----------
+    else:
+        st.markdown('<div class="panel">', unsafe_allow_html=True)
+        st.markdown("Capture a snapshot from your webcam and classify the pose instantly.")
+        img = st.camera_input("Take a snapshot")
+        if img:
+            pil = Image.open(img).convert("RGB")
+            frame = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+            with st.spinner("Detecting pose and classifying..."):
+                label, score, annotated, _ = predict_image(frame, model, draw=True)
+            x, y = st.columns(2)
+            x.image(pil, caption="Snapshot", use_container_width=True)
+            y.image(rgb(annotated), caption="Pose landmarks", use_container_width=True)
+            if label:
+                st.success(f"Predicted dance form: {label}")
+                st.metric("Classifier score", f"{score:.1%}")
+            else:
+                st.error("No pose detected. Ensure your full body is visible and well lit.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
+# ============================ LEARNING GUIDE ============================
+else:
+    title("Workspace / Learning", "Dance learning guide",
+          "Compare your practice against a reference pose and get visual feedback.")
+    st.markdown('<div class="panel">', unsafe_allow_html=True)
+    st.session_state.guide_dance = st.selectbox("Dance form", DANCE_FORMS,
+                                                index=DANCE_FORMS.index(st.session_state.guide_dance)
+                                                if st.session_state.guide_dance in DANCE_FORMS else 0)
+    st.markdown("**Step 1 · Save a reference pose**")
+    ref_img = st.camera_input("Capture reference pose", key="ref_capture")
+    if ref_img and st.button("Save reference", type="primary"):
+        pil = Image.open(ref_img).convert("RGB")
+        frame = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        ok, msg = save_reference(frame, st.session_state.guide_dance)
+        (st.success if ok else st.error)(msg)
+        st.rerun()
+
+    st.markdown("**Step 2 · Compare your practice**")
+    refs = list_references(st.session_state.guide_dance)
+    if refs:
+        st.session_state.guide_ref_select = st.selectbox("Reference pose", refs,
+                                                         index=0 if st.session_state.guide_ref_select is None else None)
+        practice_img = st.camera_input("Capture your practice pose", key="practice_capture")
+        if practice_img and st.button("Compare poses"):
+            practice = cv2.cvtColor(np.array(Image.open(practice_img).convert("RGB")), cv2.COLOR_RGB2BGR)
+            reference = load_reference(st.session_state.guide_dance, st.session_state.guide_ref_select)
+            result = guide_compare(reference, practice)
+            if result.get("match") is not None:
+                st.metric("Pose similarity", f"{result['match']:.1%}")
+            if result.get("annotated") is not None:
+                st.image(rgb(result["annotated"]), caption="Practice overlay", use_container_width=True)
+            for tip in result.get("feedback", []):
+                st.info(tip)
+    else:
+        st.info("No reference saved for this dance form yet. Capture one above first.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ---------------- Footer ----------------
 st.divider()
-st.markdown('<p style="text-align:center;color:#8b796e;font-size:.8rem">NRITYA AI · Academic prototype · Recognition quality depends on dataset quality</p>', unsafe_allow_html=True)
+st.caption("Built with Streamlit, OpenCV & MediaPipe — Ox Alpha demo app.")
 
 
 
