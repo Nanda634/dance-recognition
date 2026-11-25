@@ -12,8 +12,9 @@ from PIL import Image
 from src.dataset import CLASSES, discover_classes, extract_dataset
 from src.model import train_from_dataframe
 from src.inference import predict_image, predict_video
-from learning_guide import (DANCE_FORMS, extract as guide_extract, compare as guide_compare,
-                            save_reference, list_references, load_reference, analyze_video)
+from learning_guide import (
+    save_reference, load_reference, list_references, guide_compare, REF_DIR
+)
 
 ROOT = Path(__file__).resolve().parent
 RAW = ROOT / "data" / "raw"
@@ -328,19 +329,22 @@ else:
     if ref_img and st.button("Save reference", type="primary"):
         pil = Image.open(ref_img).convert("RGB")
         frame = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        ok, msg = save_reference(frame, st.session_state.guide_dance)
+        ok, msg = save_reference(REF_DIR, frame, st.session_state.guide_dance)
+
         (st.success if ok else st.error)(msg)
         st.rerun()
 
     st.markdown("**Step 2 · Compare your practice**")
-    refs = list_references(st.session_state.guide_dance)
+    refs = list_references(REF_DIR, st.session_state.guide_dance)
+
     if refs:
         st.session_state.guide_ref_select = st.selectbox("Reference pose", refs,
                                                          index=0 if st.session_state.guide_ref_select is None else None)
         practice_img = st.camera_input("Capture your practice pose", key="practice_capture")
         if practice_img and st.button("Compare poses"):
             practice = cv2.cvtColor(np.array(Image.open(practice_img).convert("RGB")), cv2.COLOR_RGB2BGR)
-            reference = load_reference(st.session_state.guide_dance, st.session_state.guide_ref_select)
+            reference = load_reference(REF_DIR, st.session_state.guide_dance, st.session_state.guide_ref_select)
+
             result = guide_compare(reference, practice)
             if result.get("match") is not None:
                 st.metric("Pose similarity", f"{result['match']:.1%}")

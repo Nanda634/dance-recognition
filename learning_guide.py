@@ -7,6 +7,7 @@ import re
 import numpy as np
 import cv2
 from src.pose import get_pose
+REF_DIR = Path("reference_poses")
 
 JOINTS = {
     'Left elbow': (11,13,15), 'Right elbow': (12,14,16),
