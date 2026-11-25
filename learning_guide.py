@@ -14,7 +14,7 @@ JOINTS = {
     'Left hip': (11,23,25), 'Right hip': (12,24,26),
     'Left knee': (23,25,27), 'Right knee': (24,26,28),
 }
-DANCE_FORMS = ['Bharatanatyam','Kuchipudi','Kathak','Odissi','Mohiniyattam','Kathakali']
+DANCE_FORMS = ['Bharatanatyam','Kuchipudi','Kathak','Odissi','Mohiniyattam','Kathakali', 'Manipuri','Sattriya']
 
 def safe_name(s):
     return re.sub(r'[^A-Za-z0-9_-]+','_',s.strip())[:65].strip('_') or 'pose'
